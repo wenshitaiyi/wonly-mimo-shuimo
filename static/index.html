@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>泼墨飞天 - Wonly Mimo Shuimo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      overflow: hidden;
+      background: #fcfaf8;
+      font-family: 'Microsoft YaHei', sans-serif;
+    }
+
+    /* 主容器：全屏 */
+    #hero {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    /* 底层飞天图 */
+    #hero .hero__bg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    /* Canvas 遮罩层：覆盖在飞天图上方 */
+    #heroMask {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* 触摸设备：隐藏 canvas，直接显示画作 */
+    @media (hover: none) {
+      #heroMask {
+        display: none;
+      }
+    }
+
+    /* 标题 */
+    .hero__title {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2;
+      color: #fff;
+      font-size: 2rem;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+
+    #hero:hover .hero__title {
+      opacity: 1;
+    }
+
+    /* 提示文字 */
+    .hero__hint {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 2;
+      color: #8b7b6b;
+      font-size: 1.2rem;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+    }
+
+    #hero:hover .hero__hint {
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="hero">
+  <!-- 飞天背景图 -->
+  <img class="hero__bg" src="ref/飞天4.png" alt="飞天仕女图">
+
+  <!-- Canvas 遮罩 -->
+  <canvas id="heroMask"></canvas>
+
+  <!-- 提示文字 -->
+  <div class="hero__hint">移动鼠标，泼墨见飞天</div>
+
+  <!-- 标题 -->
+  <div class="hero__title">泼墨飞天</div>
+</div>
+
+<script>
+  (function () {
+    const hero = document.getElementById("hero");
+    const canvas = document.getElementById("heroMask");
+    if (!hero || !canvas) return;
+
+    // 触摸设备不启用（CSS 已隐藏 canvas）
+    const canHover = window.matchMedia("(hover: hover)").matches;
+    if (!canHover) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // 遮罩颜色（与页面背景一致）
+    const MASK = "252, 250, 248";
+    const R_START = 8;        // 墨点初始半径
+    const R_END = 128;        // 墨点最大半径基准
+    const R_VARY = 0.45;      // 每个墨点大小随机变化范围
+    const LIFETIME = 520;     // 墨点存活时间（毫秒）
+    const STAMP_STEP = 12;    // 鼠标路径上墨点间距
+    const MAX_STAMPS = 160;   // 同时存活的最大墨点数
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+    let w = 0;
+    let h = 0;
+
+    // 初始化 canvas 尺寸
+    function resize() {
+      const rect = hero.getBoundingClientRect();
+      w = rect.width;
+      h = rect.height;
+      canvas.width = Math.round(w * DPR);
+      canvas.height = Math.round(h * DPR);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "rgb(" + MASK + ")";
+      ctx.fillRect(0, 0, w, h);
+    }
+    resize();
+    window.addEventListener("resize", resize);
+
+    // 存活中的墨点
+    const stamps = [];
+    let lastX = null;
+    let lastY = null;
+
+    // 添加一个墨点
+    function addStamp(x, y) {
+      if (stamps.length >= MAX_STAMPS) stamps.shift();
+      stamps.push({
+        x: x,
+        y: y,
+        born: performance.now(),
+        seed: Math.random() * Math.PI * 2,
+        rmax: R_END * (1 - R_VARY + Math.random() * R_VARY),
+      });
+    }
+
+    // 沿鼠标路径插值添加墨点
+    function stampAlong(x, y) {
+      if (lastX === null) {
+        addStamp(x, y);
+      } else {
+        const dx = x - lastX;
+        const dy = y - lastY;
+        const dist = Math.hypot(dx, dy);
+        const steps = Math.max(1, Math.ceil(dist / STAMP_STEP));
+        for (let i = 1; i <= steps; i++) {
+          addStamp(lastX + (dx * i) / steps, lastY + (dy * i) / steps);
+        }
+      }
+      lastX = x;
+      lastY = y;
+    }
+
+    // 绘制单个墨点：不规则、柔边的孔洞
+    // 用锯齿半径模拟 feTurbulence 的墨迹边缘
+    function carveInk(x, y, r, alpha, seed) {
+      const g = ctx.createRadialGradient(x, y, r * 0.25, x, y, r);
+      g.addColorStop(0, "rgba(0, 0, 0, " + 0.95 * alpha + ")");
+      g.addColorStop(0.55, "rgba(0, 0, 0, " + 0.88 * alpha + ")");
+      g.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      const segs = 32;
+      for (let i = 0; i <= segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        // 多层正弦叠加产生不规则边缘
+        const wob =
+          0.78 +
+          0.14 * Math.sin(a * 3 + seed) +
+          0.08 * Math.sin(a * 7 + seed * 2.1) +
+          0.05 * Math.sin(a * 13 + seed * 0.7);
+        const rr = r * wob;
+        const px = x + Math.cos(a) * rr;
+        const py = y + Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 动画循环
+    let running = false;
+    function loop() {
+      const now = performance.now();
+
+      // 重绘遮罩，再用 destination-out 把墨点区域挖掉
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "rgb(" + MASK + ")";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.globalCompositeOperation = "destination-out";
+      for (let i = stamps.length - 1; i >= 0; i--) {
+        const t = (now - stamps[i].born) / LIFETIME;
+        if (t >= 1) {
+          stamps.splice(i, 1);
+          continue;
+        }
+        const ease = 1 - Math.pow(1 - t, 3); // easeOutCubic 扩张
+        const r = R_START + (stamps[i].rmax - R_START) * ease;
+        const alpha = 1 - t * t; // 随时间淡出
+        carveInk(stamps[i].x, stamps[i].y, r, alpha, stamps[i].seed);
+      }
+
+      if (stamps.length) {
+        requestAnimationFrame(loop);
+      } else {
+        running = false; // 无墨点时暂停
+      }
+    }
+
+    function start() {
+      if (!running) {
+        running = true;
+        requestAnimationFrame(loop);
+      }
+    }
+
+    // 鼠标事件
+    hero.addEventListener("mouseenter", function (e) {
+      const rect = hero.getBoundingClientRect();
+      lastX = e.clientX - rect.left;
+      lastY = e.clientY - rect.top;
+      stampAlong(lastX, lastY);
+      start();
+    });
+
+    hero.addEventListener("mousemove", function (e) {
+      const rect = hero.getBoundingClientRect();
+      stampAlong(e.clientX - rect.left, e.clientY - rect.top);
+      start();
+    });
+
+    hero.addEventListener("mouseleave", function () {
+      lastX = null;
+      lastY = null;
+    });
+  })();
+</script>
+
+</body>
+</html>
