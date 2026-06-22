@@ -1,0 +1,1 @@
+![示例图片](assets/image_123.png)
