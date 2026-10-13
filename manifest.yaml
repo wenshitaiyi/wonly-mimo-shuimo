@@ -1,0 +1,8 @@
+name: "wonly-mimo-shuimo"
+title: "泼墨飞天 - Wonly Mimo Shuimo"
+version: "0.1.0"
+description: "鼠标移动产生泼墨特效的静态网页（纯前端资源，需配合 py-lite-server 运行）"
+runtime: {}
+dependencies:
+  services: []
+  python: []
